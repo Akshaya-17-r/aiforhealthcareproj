@@ -1,4 +1,5 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import logging
 import os
 from typing import Dict, Any, Optional, List
@@ -25,37 +26,50 @@ if not logger.handlers:
 
 # Get Gemini API key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = "gemini-2.0-flash-lite"
 
-# Initialize Gemini API
-_model = None
+# Initialize Gemini client
+_client = None
+_gemini_available = False
 
 def initialize_gemini():
-    """Initialize Gemini API with key"""
-    global _model
+    """Initialize Gemini API with key (graceful fallback if unavailable)"""
+    global _client, _gemini_available
 
-    if GEMINI_API_KEY is None:
-        error_msg = "GEMINI_API_KEY environment variable not set"
-        logger.error(f"✗ {error_msg}")
-        raise ValueError(error_msg)
+    if GEMINI_API_KEY is None or GEMINI_API_KEY.strip() == "":
+        logger.warning(
+            "GEMINI_API_KEY not configured. "
+            "Text simplification will use fallback (original text). "
+            "To enable: Set GEMINI_API_KEY in .env file."
+        )
+        _gemini_available = False
+        return None
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logger.debug("Gemini API configured with API key")
-
-        _model = genai.GenerativeModel("gemini-pro")
-        logger.info("✓ Gemini Model (gemini-pro) initialized successfully")
-        return _model
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info(f"Gemini Client initialized (model: {GEMINI_MODEL})")
+        _gemini_available = True
+        return _client
     except Exception as e:
-        logger.error(f"✗ Failed to initialize Gemini: {str(e)}")
-        raise
+        logger.warning(
+            f"Failed to initialize Gemini: {str(e)}. "
+            f"Simplification will use fallback (original text)."
+        )
+        _gemini_available = False
+        return None
 
 
-def get_gemini_model():
-    """Lazy load Gemini model"""
-    global _model
-    if _model is None:
+def get_gemini_client():
+    """Lazy load Gemini client"""
+    global _client, _gemini_available
+    if _client is None and not _gemini_available:
         initialize_gemini()
-    return _model
+    return _client
+
+
+def is_gemini_available():
+    """Check if Gemini API is available"""
+    return _gemini_available
 
 
 # ============================================================================
@@ -114,21 +128,21 @@ def validate_input_text(text: str) -> tuple[bool, str]:
     """
     if not text:
         error = "Input text is empty"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
     if not isinstance(text, str):
         error = "Input must be a string"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
     text = text.strip()
     if len(text) < 10:
         error = "Input text too short (minimum 10 characters)"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
-    logger.debug(f"✓ Input validation passed: {len(text)} characters")
+    logger.debug(f"[OK] Input validation passed: {len(text)} characters")
     return True, ""
 
 
@@ -143,14 +157,14 @@ def validate_response(response: str) -> bool:
         True if response is valid
     """
     if not response or not response.strip():
-        logger.warning("✗ Empty response from Gemini API")
+        logger.warning("[FAIL] Empty response from Gemini API")
         return False
 
     if len(response) < 5:
-        logger.warning("✗ Response too short from Gemini API")
+        logger.warning("[FAIL] Response too short from Gemini API")
         return False
 
-    logger.debug(f"✓ Response validation passed: {len(response)} characters")
+    logger.debug(f"[OK] Response validation passed: {len(response)} characters")
     return True
 
 
@@ -197,7 +211,7 @@ def chunk_text_for_processing(
         # Move start position with overlap
         start = end - overlap
 
-    logger.info(f"✓ Text chunked into {len(chunks)} chunks")
+    logger.info(f"[OK] Text chunked into {len(chunks)} chunks")
     return chunks
 
 
@@ -220,7 +234,7 @@ def merge_simplified_chunks(
     merged = separator.join(chunk.strip() for chunk in chunks if chunk.strip())
     merged = merged.strip()
 
-    logger.info(f"✓ Chunks merged: {len(merged)} characters")
+    logger.info(f"[OK] Chunks merged: {len(merged)} characters")
     return merged
 
 
@@ -235,46 +249,30 @@ def merge_simplified_chunks(
     reraise=True
 )
 async def call_gemini_api(prompt: str) -> str:
-    """
-    Call Gemini API with retry logic
-
-    Args:
-        prompt: Full prompt to send to Gemini
-
-    Returns:
-        Response text from Gemini API
-
-    Raises:
-        Exception if API call fails after retries
-    """
+    """Call Gemini API with retry logic"""
     try:
         logger.debug("Calling Gemini API...")
-        model = get_gemini_model()
+        client = get_gemini_client()
 
-        # Call the model
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,  # Low temperature for accuracy
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
                 top_p=0.8,
                 top_k=40,
                 max_output_tokens=2048
             )
         )
 
-        # Extract text from response
         if response and response.text:
-            logger.debug(f"✓ Received Gemini response: {len(response.text)} characters")
+            logger.debug(f"Received Gemini response: {len(response.text)} characters")
             return response.text
 
-        else:
-            error = "Empty response from Gemini API"
-            logger.warning(f"✗ {error}")
-            raise Exception(error)
+        raise Exception("Empty response from Gemini API")
 
     except Exception as e:
-        error_msg = str(e)
-        logger.warning(f"✗ Gemini API call failed: {error_msg}")
+        logger.warning(f"Gemini API call failed: {str(e)}")
         raise
 
 
@@ -285,6 +283,8 @@ async def call_gemini_api(prompt: str) -> str:
 async def simplify_medical_text(text: str) -> Dict[str, Any]:
     """
     Simplify complex medical text into patient-friendly language
+
+    Falls back to original text if Gemini API is unavailable.
 
     Args:
         text: Raw medical text from OCR or other source
@@ -318,6 +318,19 @@ async def simplify_medical_text(text: str) -> Dict[str, Any]:
 
         original_length = len(text)
         logger.info(f"Input text length: {original_length} characters")
+
+        # Check if Gemini is available
+        if not is_gemini_available():
+            logger.warning("[!]  Gemini API not available. Using fallback (original text).")
+            return {
+                "simplified_text": text,
+                "summary": text[:200] + "..." if len(text) > 200 else text,
+                "key_findings": [],
+                "original_length": original_length,
+                "simplified_length": len(text),
+                "chunks_processed": 1,
+                "error": "Gemini API not available; using original text as simplified text"
+            }
 
         # Chunk text if too long
         chunks = chunk_text_for_processing(text)
@@ -354,7 +367,7 @@ async def simplify_medical_text(text: str) -> Dict[str, Any]:
         summary = await generate_summary(simplified_text)
 
         logger.info(
-            f"✓ Simplification complete: "
+            f"[OK] Simplification complete: "
             f"{original_length} → {len(simplified_text)} characters"
         )
 
@@ -369,14 +382,15 @@ async def simplify_medical_text(text: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
+        # Fall back to original text if simplification fails
         error_msg = f"Simplification failed: {str(e)}"
-        logger.error(f"✗ {error_msg}", exc_info=True)
+        logger.warning(f"[!]  {error_msg}. Using fallback (original text).")
         return {
-            "simplified_text": "",
-            "summary": "",
+            "simplified_text": text,
+            "summary": text[:200] + "..." if len(text) > 200 else text,
             "key_findings": [],
             "original_length": len(text),
-            "simplified_length": 0,
+            "simplified_length": len(text),
             "chunks_processed": 0,
             "error": error_msg
         }
@@ -431,11 +445,11 @@ async def extract_key_medical_findings(text: str) -> List[Dict[str, str]]:
                 "importance": 0.5
             })
 
-        logger.info(f"✓ Extracted {len(findings)} key findings")
+        logger.info(f"[OK] Extracted {len(findings)} key findings")
         return findings
 
     except Exception as e:
-        logger.error(f"✗ Error extracting findings: {str(e)}", exc_info=True)
+        logger.error(f"[FAIL] Error extracting findings: {str(e)}", exc_info=True)
         return []
 
 
@@ -455,11 +469,11 @@ async def extract_key_findings(text: str) -> List[str]:
         findings_with_severity = await extract_key_medical_findings(text)
         findings = [f["finding"] for f in findings_with_severity]
 
-        logger.info(f"✓ Extracted {len(findings)} key findings")
+        logger.info(f"[OK] Extracted {len(findings)} key findings")
         return findings
 
     except Exception as e:
-        logger.error(f"✗ Error extracting findings: {str(e)}")
+        logger.error(f"[FAIL] Error extracting findings: {str(e)}")
         return []
 
 
@@ -489,14 +503,14 @@ async def generate_summary(text: str) -> str:
         summary = await call_gemini_api(prompt)
 
         if validate_response(summary):
-            logger.info(f"✓ Summary generated: {len(summary)} characters")
+            logger.info(f"[OK] Summary generated: {len(summary)} characters")
             return summary.strip()
 
         logger.warning("Invalid summary response")
         return ""
 
     except Exception as e:
-        logger.error(f"✗ Error generating summary: {str(e)}", exc_info=True)
+        logger.error(f"[FAIL] Error generating summary: {str(e)}", exc_info=True)
         return ""
 
 
@@ -528,7 +542,7 @@ async def simplify_batch(texts: List[str]) -> List[Dict[str, Any]]:
         if i < len(texts):
             await asyncio.sleep(2)
 
-    logger.info(f"✓ Batch simplification complete")
+    logger.info(f"[OK] Batch simplification complete")
     return results
 
 

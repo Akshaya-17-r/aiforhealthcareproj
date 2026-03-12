@@ -5,16 +5,8 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
-/**
- * Get auth token from localStorage
- */
-const getAuthToken = () => {
-  return localStorage.getItem('authToken');
-};
+const getAuthToken = () => localStorage.getItem('authToken');
 
-/**
- * Make API request with error handling
- */
 const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   const headers = {
@@ -23,182 +15,112 @@ const apiRequest = async (endpoint, options = {}) => {
   };
 
   const token = getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(url, { ...options, headers });
+  const data = await response.json().catch(() => ({ message: `HTTP Error: ${response.status}` }));
+  if (!response.ok) {
+    throw new Error(data.detail || data.message || `HTTP Error: ${response.status}`);
   }
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        message: `HTTP Error: ${response.status}`,
-      }));
-      throw new Error(error.message || `HTTP Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    throw new Error(error.message || 'API request failed');
-  }
+  return data;
 };
 
-/**
- * Save user details
- */
-export const saveUserDetails = async (userDetails) => {
-  return apiRequest('/users/details', {
-    method: 'POST',
-    body: JSON.stringify(userDetails),
-  });
-};
+export const saveUserDetails = async (userDetails) =>
+  apiRequest('/users/details', { method: 'POST', body: JSON.stringify(userDetails) });
+
+export const getUserDetails = async () =>
+  apiRequest('/users/details', { method: 'GET' });
 
 /**
- * Get user details
- */
-export const getUserDetails = async () => {
-  return apiRequest('/users/details', {
-    method: 'GET',
-  });
-};
-
-/**
- * Fetch user reports
+ * Fetch reports for the current authenticated user.
+ * Backend endpoint: GET /users/{user_id}/reports  (not /reports)
  */
 export const fetchUserReports = async () => {
-  return apiRequest('/reports', {
-    method: 'GET',
-  });
+  const token = getAuthToken();
+  if (!token) throw new Error('Not authenticated');
+
+  let userId;
+  try {
+    userId = JSON.parse(atob(token.split('.')[1])).sub;
+  } catch {
+    throw new Error('Invalid auth token');
+  }
+
+  return apiRequest(`/users/${userId}/reports`, { method: 'GET' });
 };
 
-/**
- * Upload report file
- */
 export const uploadReport = async (file, metadata = {}) => {
   const formData = new FormData();
   formData.append('file', file);
-
-  // Add metadata to form data
-  Object.keys(metadata).forEach(key => {
-    formData.append(key, metadata[key]);
-  });
+  Object.entries(metadata).forEach(([k, v]) => formData.append(k, v));
 
   const headers = {};
   const token = getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE_URL}/upload-report`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({ message: `HTTP Error: ${response.status}` }));
+  if (!response.ok) {
+    throw new Error(data.detail || data.message || `Upload failed: ${response.status}`);
   }
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/upload-report`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        message: `HTTP Error: ${response.status}`,
-      }));
-      throw new Error(error.message || `HTTP Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    throw new Error(error.message || 'File upload failed');
-  }
+  return data;
 };
 
-/**
- * Get report analysis/summary
- */
-export const getReportAnalysis = async (reportId, language = 'en') => {
-  return apiRequest(`/reports/${reportId}/summary?language=${language}`, {
-    method: 'GET',
-  });
-};
+export const getReportAnalysis = async (reportId, language = 'en') =>
+  apiRequest(`/reports/${reportId}/summary?language=${language}`, { method: 'GET' });
+
+export const deleteReport = async (reportId) =>
+  apiRequest(`/reports/${reportId}`, { method: 'DELETE' });
+
+export const getReportById = async (reportId) =>
+  apiRequest(`/reports/${reportId}`, { method: 'GET' });
+
+export const updateReport = async (reportId, updates) =>
+  apiRequest(`/reports/${reportId}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 /**
- * Delete report
- */
-export const deleteReport = async (reportId) => {
-  return apiRequest(`/reports/${reportId}`, {
-    method: 'DELETE',
-  });
-};
-
-/**
- * Get report by ID
- */
-export const getReportById = async (reportId) => {
-  return apiRequest(`/reports/${reportId}`, {
-    method: 'GET',
-  });
-};
-
-/**
- * Update report
- */
-export const updateReport = async (reportId, updates) => {
-  return apiRequest(`/reports/${reportId}`, {
-    method: 'PUT',
-    body: JSON.stringify(updates),
-  });
-};
-
-/**
- * Login user
+ * Login — backend expects Form data (email, password), not JSON
  */
 export const loginUser = async (email, password) => {
-  const response = await apiRequest('/auth/login', {
+  const formData = new FormData();
+  formData.append('email', email);
+  formData.append('password', password);
+
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: formData,
   });
-  
-  if (response.token) {
-    localStorage.setItem('authToken', response.token);
+
+  const data = await response.json().catch(() => ({ message: `HTTP Error: ${response.status}` }));
+  if (!response.ok) {
+    throw new Error(data.detail || data.message || `HTTP Error: ${response.status}`);
   }
-  
-  return response;
+  if (data.token) localStorage.setItem('authToken', data.token);
+  return data;
 };
 
-/**
- * Logout user
- */
 export const logoutUser = () => {
   localStorage.removeItem('authToken');
+  localStorage.removeItem('userName');
 };
 
-/**
- * Register user
- */
 export const registerUser = async (userData) => {
   const response = await apiRequest('/auth/register', {
     method: 'POST',
     body: JSON.stringify(userData),
   });
-  
-  if (response.token) {
-    localStorage.setItem('authToken', response.token);
-  }
-  
+  if (response.token) localStorage.setItem('authToken', response.token);
   return response;
 };
 
-/**
- * Verify auth token
- */
 export const verifyToken = async () => {
   try {
-    const response = await apiRequest('/auth/verify', {
-      method: 'POST',
-    });
-    return response;
+    return await apiRequest('/auth/verify', { method: 'POST' });
   } catch (error) {
     logoutUser();
     throw error;
@@ -206,16 +128,7 @@ export const verifyToken = async () => {
 };
 
 export default {
-  saveUserDetails,
-  getUserDetails,
-  fetchUserReports,
-  uploadReport,
-  getReportAnalysis,
-  deleteReport,
-  getReportById,
-  updateReport,
-  loginUser,
-  logoutUser,
-  registerUser,
-  verifyToken,
+  saveUserDetails, getUserDetails, fetchUserReports, uploadReport,
+  getReportAnalysis, deleteReport, getReportById, updateReport,
+  loginUser, logoutUser, registerUser, verifyToken,
 };

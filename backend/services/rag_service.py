@@ -1,4 +1,5 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import logging
 import os
 from typing import Dict, Any, Optional, List
@@ -30,37 +31,50 @@ if not logger.handlers:
 
 # Get Gemini API key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = "gemini-2.0-flash-lite"
 
 # Initialize Gemini API
-_model = None
+_client = None
+_gemini_available = False
 
 def initialize_gemini():
-    """Initialize Gemini API with key"""
-    global _model
+    """Initialize Gemini API with key (graceful fallback if unavailable)"""
+    global _client, _gemini_available
 
-    if GEMINI_API_KEY is None:
-        error_msg = "GEMINI_API_KEY environment variable not set"
-        logger.error(f"✗ {error_msg}")
-        raise ValueError(error_msg)
+    if GEMINI_API_KEY is None or GEMINI_API_KEY.strip() == "":
+        logger.warning(
+            "[!] GEMINI_API_KEY not configured. "
+            "RAG question answering will use fallback responses. "
+            "To enable: Set GEMINI_API_KEY in .env file."
+        )
+        _gemini_available = False
+        return None
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logger.debug("Gemini API configured with API key")
-
-        _model = genai.GenerativeModel("gemini-pro")
-        logger.info("✓ Gemini Model (gemini-pro) initialized for RAG")
-        return _model
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info(f"[OK] Gemini Client initialized for RAG (model: {GEMINI_MODEL})")
+        _gemini_available = True
+        return _client
     except Exception as e:
-        logger.error(f"✗ Failed to initialize Gemini: {str(e)}")
-        raise
+        logger.warning(
+            f"[!] Failed to initialize Gemini: {str(e)}. "
+            f"RAG question answering will use fallback responses."
+        )
+        _gemini_available = False
+        return None
 
 
-def get_gemini_model():
-    """Lazy load Gemini model"""
-    global _model
-    if _model is None:
+def get_gemini_client():
+    """Lazy load Gemini client"""
+    global _client, _gemini_available
+    if _client is None and not _gemini_available:
         initialize_gemini()
-    return _model
+    return _client
+
+
+def is_gemini_available():
+    """Check if Gemini API is available"""
+    return _gemini_available
 
 
 # ============================================================================
@@ -173,7 +187,7 @@ def construct_context_from_results(
     context = "\n\n".join(context_parts)
 
     logger.info(
-        f"✓ Context constructed: {len(context_parts)} documents, "
+        f"[OK] Context constructed: {len(context_parts)} documents, "
         f"total length: {len(context)} characters"
     )
 
@@ -289,14 +303,14 @@ async def search_user_reports(
                 break
 
         logger.info(
-            f"✓ Retrieved {len(filtered_results)} relevant documents "
+            f"[OK] Retrieved {len(filtered_results)} relevant documents "
             f"for user {user_id} (min similarity: {min_similarity})"
         )
 
         return filtered_results
 
     except Exception as e:
-        logger.error(f"✗ Error searching vector database: {str(e)}", exc_info=True)
+        logger.error(f"[FAIL] Error searching vector database: {str(e)}", exc_info=True)
         return []
 
 
@@ -325,11 +339,12 @@ async def call_gemini_for_answer(prompt: str) -> str:
     """
     try:
         logger.debug("Calling Gemini API for answer generation...")
-        model = get_gemini_model()
+        client = get_gemini_client()
 
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.3,  # Low temperature for factuality
                 top_p=0.8,
                 top_k=40,
@@ -338,16 +353,16 @@ async def call_gemini_for_answer(prompt: str) -> str:
         )
 
         if response and response.text:
-            logger.debug(f"✓ Received Gemini response: {len(response.text)} characters")
+            logger.debug(f"[OK] Received Gemini response: {len(response.text)} characters")
             return response.text.strip()
         else:
             error = "Empty response from Gemini API"
-            logger.warning(f"✗ {error}")
+            logger.warning(f"[FAIL] {error}")
             raise Exception(error)
 
     except Exception as e:
         error_msg = str(e)
-        logger.warning(f"✗ Gemini API call failed: {error_msg}")
+        logger.warning(f"[FAIL] Gemini API call failed: {error_msg}")
         raise
 
 
@@ -395,7 +410,7 @@ async def answer_medical_question(
         # Validate inputs
         if not question or len(question.strip()) < 3:
             error_msg = "Question too short (minimum 3 characters)"
-            logger.warning(f"✗ {error_msg}")
+            logger.warning(f"[FAIL] {error_msg}")
             return {
                 "answer": "",
                 "question": question,
@@ -410,7 +425,7 @@ async def answer_medical_question(
 
         if not user_id or len(user_id.strip()) == 0:
             error_msg = "Invalid user ID"
-            logger.warning(f"✗ {error_msg}")
+            logger.warning(f"[FAIL] {error_msg}")
             return {
                 "answer": "",
                 "question": question,
@@ -427,10 +442,10 @@ async def answer_medical_question(
         logger.info("Step 1: Generating question embedding...")
         try:
             question_embedding = await generate_embedding(question)
-            logger.info(f"✓ Question embedding generated: {len(question_embedding)} dimensions")
+            logger.info(f"[OK] Question embedding generated: {len(question_embedding)} dimensions")
         except Exception as e:
             error_msg = f"Failed to generate question embedding: {str(e)}"
-            logger.error(f"✗ {error_msg}")
+            logger.error(f"[FAIL] {error_msg}")
             return {
                 "answer": "",
                 "question": question,
@@ -453,12 +468,12 @@ async def answer_medical_question(
         )
 
         retrieval_count = len(search_results)
-        logger.info(f"✓ Retrieved {retrieval_count} relevant documents")
+        logger.info(f"[OK] Retrieved {retrieval_count} relevant documents")
 
         # ==================== STEP 3: Extract Medical Terms ====================
         logger.info("Step 3: Extracting medical terms from question...")
         medical_terms = extract_medical_terms_from_query(question)
-        logger.info(f"✓ Found {len(medical_terms)} medical terms in question")
+        logger.info(f"[OK] Found {len(medical_terms)} medical terms in question")
 
         # ==================== STEP 4 & 5: Context Construction & Answer Generation ====================
         context_used = False
@@ -491,51 +506,53 @@ async def answer_medical_question(
                 ]
 
                 # ==================== STEP 5: Generate Answer with Gemini ====================
-                logger.info("Step 5: Generating answer with Gemini...")
+                # Check if Gemini is available
+                if is_gemini_available():
+                    logger.info("Step 5: Generating answer with Gemini...")
 
-                prompt = PATIENT_QUESTION_PROMPT.format(
-                    question=question,
-                    context=context
-                )
+                    prompt = PATIENT_QUESTION_PROMPT.format(
+                        question=question,
+                        context=context
+                    )
 
-                try:
-                    answer = await call_gemini_for_answer(prompt)
-                    logger.info(f"✓ Answer generated: {len(answer)} characters")
-                except Exception as e:
-                    error_msg = f"Failed to generate answer: {str(e)}"
-                    logger.error(f"✗ {error_msg}")
-                    return {
-                        "answer": "",
-                        "question": question,
-                        "sources": sources,
-                        "confidence": confidence,
-                        "context_used": True,
-                        "medical_terms": medical_terms,
-                        "retrieval_count": retrieval_count,
-                        "error": error_msg,
-                        "success": False
-                    }
+                    try:
+                        answer = await call_gemini_for_answer(prompt)
+                        logger.info(f"[OK] Answer generated: {len(answer)} characters")
+                    except Exception as e:
+                        error_msg = f"Failed to generate answer: {str(e)}"
+                        logger.warning(f"[!]  {error_msg}. Using fallback response.")
+                        # Use context directly as fallback answer
+                        answer = f"Based on your medical reports: {context[:300]}..."
+                else:
+                    logger.warning("[!]  Gemini API not available. Using context as fallback answer.")
+                    # Use context directly as fallback answer
+                    answer = f"Based on your medical reports: {context[:300]}..."
             else:
                 logger.warning("No meaningful context could be constructed from search results")
 
         if not context_used or not answer:
-            # No relevant context found - generate empathetic response
+            # No relevant context found - generate fallback response
             logger.warning("No relevant context found - generating fallback response...")
 
-            prompt = CONTEXT_IRRELEVANT_PROMPT.format(question=question)
+            if is_gemini_available():
+                prompt = CONTEXT_IRRELEVANT_PROMPT.format(question=question)
 
-            try:
-                answer = await call_gemini_for_answer(prompt)
-                confidence = 0.0
-                context_used = False
-            except Exception as e:
-                answer = "I apologize, but I'm unable to answer this question at the moment. Please try again later or contact your healthcare provider."
-                logger.error(f"Failed to generate fallback response: {str(e)}")
+                try:
+                    answer = await call_gemini_for_answer(prompt)
+                    confidence = 0.0
+                    context_used = False
+                except Exception as e:
+                    logger.error(f"Failed to generate fallback response: {str(e)}")
+                    answer = "I couldn't find relevant information in your medical reports to answer this question. Please consult your healthcare provider for more details."
+            else:
+                # No Gemini available and no context - use generic fallback
+                answer = "I couldn't find relevant information in your medical reports to answer this question. Please consult your healthcare provider for more details."
+                logger.warning("[!]  Using generic fallback response (Gemini API not available).")
 
         processing_time = time.time() - start_time
 
         logger.info("="*70)
-        logger.info("✓ Medical question answered successfully")
+        logger.info("[OK] Medical question answered successfully")
         logger.info(f"Confidence: {confidence:.2f}, Sources: {len(sources)}, Time: {processing_time:.2f}s")
         logger.info("="*70)
 
@@ -554,7 +571,7 @@ async def answer_medical_question(
 
     except Exception as e:
         error_msg = f"Unexpected error in RAG pipeline: {str(e)}"
-        logger.error(f"✗ {error_msg}", exc_info=True)
+        logger.error(f"[FAIL] {error_msg}", exc_info=True)
         return {
             "answer": "",
             "question": question,
@@ -659,7 +676,7 @@ async def batch_medical_questions(
             if not skip_errors:
                 raise
 
-    logger.info(f"✓ Batch processing complete: {successful} successful, {failed} failed")
+    logger.info(f"[OK] Batch processing complete: {successful} successful, {failed} failed")
 
     return {
         "total": len(questions),
@@ -673,7 +690,7 @@ def get_rag_stats() -> Dict[str, Any]:
     """Get RAG service statistics"""
     return {
         "service": "RAG",
-        "model": "gemini-pro",
+        "model": GEMINI_MODEL,
         "embedding_dimension": 384,
         "vector_db": "ChromaDB",
         "min_similarity_default": 0.3,
@@ -736,7 +753,7 @@ async def semantic_search_reports(
             min_similarity=0.2
         )
 
-        logger.info(f"✓ Semantic search returned {len(results)} results")
+        logger.info(f"[OK] Semantic search returned {len(results)} results")
 
         return {
             "query": query,

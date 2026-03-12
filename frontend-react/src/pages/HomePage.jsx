@@ -1,12 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Footer from '../components/Footer';
-import MyDetailsModal from '../components/MyDetailsModal';
-import MyReportsModal from '../components/MyReportsModal';
 import '../styles/home.css';
 
-export default function HomePage() {
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [showReportsModal, setShowReportsModal] = useState(false);
+export default function HomePage({ onNameUpdate }) {
   const [userName, setUserName] = useState('');
 
   useEffect(() => {
@@ -16,6 +12,7 @@ export default function HomePage() {
 
   const handleNameUpdate = (name) => {
     setUserName(name);
+    if (onNameUpdate) onNameUpdate(name);
     localStorage.setItem('userName', name);
   };
 
@@ -57,7 +54,6 @@ export default function HomePage() {
             <h3>AI Summarization</h3>
             <p>Extracts what matters — diagnoses, values, findings — without the noise.</p>
           </div>
-
           <div className="card">
             <div className="card-icon">
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round">
@@ -70,7 +66,6 @@ export default function HomePage() {
             <h3>Plain Language</h3>
             <p>No medical degree needed. We rewrite your report so anyone can understand it.</p>
           </div>
-
           <div className="card">
             <div className="card-icon">
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round">
@@ -103,7 +98,6 @@ export default function HomePage() {
             <p>PDF or image, any format</p>
           </div>
           <div className="step-line"></div>
-
           <div className="step">
             <div className="step-circle">
               <span className="step-num">2</span>
@@ -116,7 +110,6 @@ export default function HomePage() {
             <p>Extracts key findings</p>
           </div>
           <div className="step-line"></div>
-
           <div className="step">
             <div className="step-circle">
               <span className="step-num">3</span>
@@ -131,7 +124,6 @@ export default function HomePage() {
             <p>Clear, plain explanation</p>
           </div>
           <div className="step-line"></div>
-
           <div className="step">
             <div className="step-circle">
               <span className="step-num">4</span>
@@ -152,44 +144,16 @@ export default function HomePage() {
         <div className="section-tag">Languages</div>
         <h2 className="section-title">Speak the Same Language as Your Patient</h2>
         <div className="lang-chips">
-          <div className="chip">
-            <div className="flag">🇮🇳</div>
-            <div>
-              <strong>Tamil</strong>
-              <span>தமிழ்</span>
-            </div>
-          </div>
-          <div className="chip">
-            <div className="flag">🇮🇳</div>
-            <div>
-              <strong>Hindi</strong>
-              <span>हिन्दी</span>
-            </div>
-          </div>
-          <div className="chip">
-            <div className="flag">🇮🇳</div>
-            <div>
-              <strong>Kannada</strong>
-              <span>ಕನ್ನಡ</span>
-            </div>
-          </div>
-          <div className="chip">
-            <div className="flag">🌐</div>
-            <div>
-              <strong>English</strong>
-              <span>Default</span>
-            </div>
-          </div>
+          <div className="chip"><div className="flag">🇮🇳</div><div><strong>Tamil</strong><span>தமிழ்</span></div></div>
+          <div className="chip"><div className="flag">🇮🇳</div><div><strong>Hindi</strong><span>हिन्दी</span></div></div>
+          <div className="chip"><div className="flag">🇮🇳</div><div><strong>Kannada</strong><span>ಕನ್ನಡ</span></div></div>
+          <div className="chip"><div className="flag">🌐</div><div><strong>English</strong><span>Default</span></div></div>
         </div>
       </section>
 
       {/* CTA */}
       <section className="cta">
-        <h2>
-          Stop Guessing.
-          <br />
-          Start <em>Knowing.</em>
-        </h2>
+        <h2>Stop Guessing.<br />Start <em>Knowing.</em></h2>
         <p>Upload your report. Get answers your doctor forgot to explain.</p>
         <a className="cta-btn" href="/upload">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -202,19 +166,6 @@ export default function HomePage() {
       </section>
 
       <Footer />
-
-      {/* MODALS */}
-      {showDetailsModal && (
-        <MyDetailsModal
-          isOpen={showDetailsModal}
-          onClose={() => setShowDetailsModal(false)}
-          onNameUpdate={handleNameUpdate}
-        />
-      )}
-
-      {showReportsModal && (
-        <MyReportsModal isOpen={showReportsModal} onClose={() => setShowReportsModal(false)} />
-      )}
     </div>
   );
 }

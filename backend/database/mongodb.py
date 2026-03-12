@@ -1,8 +1,13 @@
 from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError
+from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
+import time
+import logging
+
+import ssl
+import certifi
 
 load_dotenv()
 from typing import Optional, List, Dict, Any
@@ -11,29 +16,76 @@ from typing import Optional, List, Dict, Any
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "medicalreport")
 
+logger = logging.getLogger(__name__)
+
 class MongoDBConnection:
     _client: Optional[MongoClient] = None
     _db = None
+    _max_retries = 5
+    _base_wait_time = 1  # Start with 1 second
 
     @classmethod
     def connect(cls):
-        """Establish MongoDB connection"""
-        try:
-            cls._client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-            cls._client.admin.command("ping")
-            cls._db = cls._client[DB_NAME]
-            print("✓ MongoDB Connected Successfully")
-            return cls._db
-        except ServerSelectionTimeoutError as e:
-            print(f"✗ MongoDB Connection Failed: {e}")
-            raise
+        """
+        Establish MongoDB connection with exponential backoff retry logic
+
+        Retries up to 5 times with exponential backoff:
+        - Attempt 1: wait 1s
+        - Attempt 2: wait 2s
+        - Attempt 3: wait 4s
+        - Attempt 4: wait 8s
+        - Attempt 5: wait 16s
+        """
+        for attempt in range(1, cls._max_retries + 1):
+            try:
+                logger.info(f"MongoDB connection attempt {attempt}/{cls._max_retries}...")
+
+                is_atlas = "mongodb.net" in MONGO_URI or "mongodb+srv" in MONGO_URI
+
+                cls._client = MongoClient(
+                    MONGO_URI,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=10000,
+                    retryWrites=True,
+                    maxPoolSize=10,
+                    # Use certifi CA bundle for SSL — fixes TLS handshake errors
+                    # on Python 3.10+ / Windows when connecting to MongoDB Atlas
+                    tlsCAFile=certifi.where() if is_atlas else None,
+                )
+
+                # Verify connection
+                cls._client.admin.command("ping")
+                cls._db = cls._client[DB_NAME]
+
+                logger.info("[OK] MongoDB Connected Successfully")
+                print("[OK] MongoDB Connected Successfully")
+                return cls._db
+
+            except (ServerSelectionTimeoutError, ConnectionFailure) as e:
+                if attempt < cls._max_retries:
+                    wait_time = cls._base_wait_time * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"MongoDB connection failed (attempt {attempt}/{cls._max_retries}). "
+                        f"Retrying in {wait_time} seconds... Error: {e}"
+                    )
+                    print(f"[WAIT] Retrying MongoDB connection in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"[FAIL] MongoDB Connection Failed after {cls._max_retries} attempts: {e}")
+                    print(f"[FAIL] MongoDB Connection Failed after {cls._max_retries} attempts")
+                    raise Exception(
+                        f"Could not connect to MongoDB after {cls._max_retries} retries. "
+                        f"Please check your MONGO_URI in .env file. Last error: {str(e)}"
+                    )
 
     @classmethod
     def disconnect(cls):
         """Close MongoDB connection"""
         if cls._client:
             cls._client.close()
-            print("✓ MongoDB Disconnected")
+            cls._db = None
+            logger.info("[OK] MongoDB Disconnected")
+            print("[OK] MongoDB Disconnected")
 
     @classmethod
     def get_db(cls):

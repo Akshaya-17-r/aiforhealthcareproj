@@ -27,17 +27,17 @@ class VectorDBConnection:
                 name=COLLECTION_NAME,
                 metadata={"hnsw:space": "cosine"}
             )
-            print("✓ ChromaDB Initialized Successfully")
+            print("[OK] ChromaDB Initialized Successfully")
             return cls._collection
         except Exception as e:
-            print(f"✗ ChromaDB Initialization Failed: {e}")
+            print(f"[FAIL] ChromaDB Initialization Failed: {e}")
             raise
 
     @classmethod
     def disconnect(cls):
         """Close ChromaDB connection"""
         if cls._client:
-            print("✓ ChromaDB Disconnected")
+            print("[OK] ChromaDB Disconnected")
             cls._client = None
 
     @classmethod

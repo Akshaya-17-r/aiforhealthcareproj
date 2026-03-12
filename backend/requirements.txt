@@ -1,6 +1,8 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+python-multipart==0.0.9
 pymongo==4.6.0
+certifi
 chromadb==0.4.24
 sentence-transformers==2.2.2
 pydantic==2.5.0
@@ -13,8 +15,11 @@ pillow==10.1.0
 pytesseract==0.3.10
 
 # AI Services
-google-generativeai==0.3.0
+google-genai
 tenacity==8.2.3
+
+# Authentication
+PyJWT==2.8.0
 
 # Async Task Queue (Optional but recommended)
 celery==5.3.4

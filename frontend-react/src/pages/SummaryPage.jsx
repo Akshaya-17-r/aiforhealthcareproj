@@ -72,34 +72,32 @@ const SummaryPage = () => {
         setLoading(true);
         let data = null;
 
-        // Try localStorage first
-        const stored = localStorage.getItem('currentReport');
-        if (stored) {
-          try {
-            data = JSON.parse(stored);
-          } catch (e) {
-            console.log('Failed to parse stored report, using mock data');
-            data = getMockReportByID(reportId);
-          }
-        } else if (reportId && reportId !== 'mock') {
-          // If we have a reportId (and it's not 'mock'), try the API
-          try {
-            const response = await summaryApi.getReportSummary(reportId, 'en');
-            data = response.data;
-          } catch (apiError) {
-            console.log('API unavailable, using mock data for:', reportId);
-            data = getMockReportByID(reportId);
-          }
-        } else {
-          // No reportId or reportId is 'mock', use default mock data
+        const isMockId = !reportId || reportId === 'mock' || MOCK_REPORTS_MAP[reportId?.toLowerCase()];
+
+        if (isMockId) {
+          // Known mock ID — use local mock data directly
           data = getMockReportByID(reportId);
+        } else {
+          // Real report ID — fetch from backend
+          try {
+            // summaryApi now returns data at the top level (no .data nesting)
+            const response = await summaryApi.getReportSummary(reportId, 'en');
+            if (response.success && response.medical_summary) {
+              data = response;
+            } else {
+              // Backend returned an error or empty result — fall back to mock
+              console.warn('API returned empty/failed summary, using mock for:', reportId);
+              data = getMockReportByID(reportId);
+            }
+          } catch (apiError) {
+            console.warn('API unavailable, using mock data for:', reportId);
+            data = getMockReportByID(reportId);
+          }
         }
 
-        // Always ensure we have data
         setReportData(data || getMockReportByID(reportId));
       } catch (error) {
         console.error('Error fetching report:', error);
-        // Fallback to mock data
         setReportData(getMockReportByID(reportId));
       } finally {
         setLoading(false);

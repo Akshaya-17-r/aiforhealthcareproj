@@ -3,52 +3,32 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { LANGS, EN_COMP, LANGUAGE_ORDER } from '../data/translationData';
 import summaryApi from '../services/summaryApi';
 import {
-  MOCK_REPORT_KPATEL,
-  MOCK_REPORT_YASH_PATEL,
-  MOCK_REPORT_AMIRTHA,
-  MOCK_REPORT_SARAH_KHAN,
-  MOCK_REPORT_RAJESH_KUMAR
+  MOCK_REPORT_KPATEL, MOCK_REPORT_YASH_PATEL, MOCK_REPORT_AMIRTHA,
+  MOCK_REPORT_SARAH_KHAN, MOCK_REPORT_RAJESH_KUMAR
 } from '../data/mockData';
 import '../styles/translation.css';
 import Toast from '../components/Toast';
 import MyDetailsModal from '../components/MyDetailsModal';
 import MyReportsModal from '../components/MyReportsModal';
 
-// Map of reportId to mock report data
 const MOCK_REPORTS_MAP = {
-  'mock_kpatel_001': MOCK_REPORT_KPATEL,
-  'kpatel': MOCK_REPORT_KPATEL,
-  'k-patel': MOCK_REPORT_KPATEL,
-  'kpatel_blood': MOCK_REPORT_KPATEL,
-
-  'mock_yash_001': MOCK_REPORT_YASH_PATEL,
-  'yash': MOCK_REPORT_YASH_PATEL,
-  'yash-patel': MOCK_REPORT_YASH_PATEL,
-  'yash_fasting': MOCK_REPORT_YASH_PATEL,
-
-  'mock_amirtha_001': MOCK_REPORT_AMIRTHA,
-  'amirtha': MOCK_REPORT_AMIRTHA,
-  'ms-amirtha': MOCK_REPORT_AMIRTHA,
-  'amirtha_blood': MOCK_REPORT_AMIRTHA,
-
-  'mock_sarah_001': MOCK_REPORT_SARAH_KHAN,
-  'sarah': MOCK_REPORT_SARAH_KHAN,
-  'sarah-khan': MOCK_REPORT_SARAH_KHAN,
-  'sarah_lipid': MOCK_REPORT_SARAH_KHAN,
-
-  'mock_rajesh_001': MOCK_REPORT_RAJESH_KUMAR,
-  'rajesh': MOCK_REPORT_RAJESH_KUMAR,
-  'rajesh-kumar': MOCK_REPORT_RAJESH_KUMAR,
-  'rajesh_thyroid': MOCK_REPORT_RAJESH_KUMAR,
+  'mock_kpatel_001': MOCK_REPORT_KPATEL, 'kpatel': MOCK_REPORT_KPATEL,
+  'k-patel': MOCK_REPORT_KPATEL, 'kpatel_blood': MOCK_REPORT_KPATEL,
+  'mock_yash_001': MOCK_REPORT_YASH_PATEL, 'yash': MOCK_REPORT_YASH_PATEL,
+  'yash-patel': MOCK_REPORT_YASH_PATEL, 'yash_fasting': MOCK_REPORT_YASH_PATEL,
+  'mock_amirtha_001': MOCK_REPORT_AMIRTHA, 'amirtha': MOCK_REPORT_AMIRTHA,
+  'ms-amirtha': MOCK_REPORT_AMIRTHA, 'amirtha_blood': MOCK_REPORT_AMIRTHA,
+  'mock_sarah_001': MOCK_REPORT_SARAH_KHAN, 'sarah': MOCK_REPORT_SARAH_KHAN,
+  'sarah-khan': MOCK_REPORT_SARAH_KHAN, 'sarah_lipid': MOCK_REPORT_SARAH_KHAN,
+  'mock_rajesh_001': MOCK_REPORT_RAJESH_KUMAR, 'rajesh': MOCK_REPORT_RAJESH_KUMAR,
+  'rajesh-kumar': MOCK_REPORT_RAJESH_KUMAR, 'rajesh_thyroid': MOCK_REPORT_RAJESH_KUMAR,
 };
 
-// Function to get mock report by ID
-const getMockReportByID = (reportId) => {
-  if (!reportId) return MOCK_REPORT_KPATEL;
+const getMockReportByID = (id) =>
+  !id ? MOCK_REPORT_KPATEL : MOCK_REPORTS_MAP[id.toLowerCase()] || MOCK_REPORT_KPATEL;
 
-  const lowerCaseId = reportId.toLowerCase();
-  return MOCK_REPORTS_MAP[lowerCaseId] || MOCK_REPORT_KPATEL;
-};
+// Language code → full name for the translation API
+const LANG_NAMES = { en: 'English', ta: 'Tamil', hi: 'Hindi', kn: 'Kannada' };
 
 export default function Translation() {
   const { reportId } = useParams();
@@ -59,50 +39,71 @@ export default function Translation() {
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [userName, setUserName] = useState('Guest');
   const [reportData, setReportData] = useState(null);
-  const [translationData, setTranslationData] = useState(null);
+  const [translatedContent, setTranslatedContent] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [translationLoading, setTranslationLoading] = useState(false);
   const navigate = useNavigate();
   const contentRef = useRef(null);
 
-  // Fetch report data and translation on mount or when language changes
+  // Fetch base English summary on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-
-        // Fetch report summary
-        try {
-          const summary = await summaryApi.getReportSummary(reportId || 'demo', 'en');
-          setReportData(summary);
-        } catch (apiError) {
-          console.log('API unavailable, using mock data for:', reportId);
-          // Use mock data as fallback
+        if (reportId) {
+          const isMockId = MOCK_REPORTS_MAP[reportId.toLowerCase()];
+          if (isMockId) {
+            setReportData(getMockReportByID(reportId));
+          } else {
+            try {
+              const summary = await summaryApi.getReportSummary(reportId, 'en');
+              setReportData(summary.success ? summary : getMockReportByID(reportId));
+            } catch {
+              setReportData(getMockReportByID(reportId));
+            }
+          }
+        } else {
           setReportData(getMockReportByID(reportId));
         }
-
-        // Load user name from localStorage
         const stored = localStorage.getItem('userName');
         if (stored) setUserName(stored);
-      } catch (error) {
-        console.error('Error fetching data:', error);
+      } catch {
         setReportData(getMockReportByID(reportId));
       } finally {
         setLoading(false);
       }
     };
-
-    if (reportId) {
-      fetchData();
-    } else {
-      // No reportId, use default mock data
-      setReportData(getMockReportByID(reportId));
-      setLoading(false);
-    }
+    fetchData();
   }, [reportId]);
+
+  // Fetch translated content from backend whenever language changes (non-English, real report)
+  useEffect(() => {
+    const fetchTranslation = async () => {
+      if (!reportId || currentLanguage === 'en') {
+        setTranslatedContent(null);
+        return;
+      }
+      const isMockId = MOCK_REPORTS_MAP[reportId.toLowerCase()];
+      if (isMockId) {
+        // For mock reports, use static LANGS data — no backend call
+        setTranslatedContent(null);
+        return;
+      }
+      setTranslationLoading(true);
+      try {
+        const result = await summaryApi.getReportTranslation(reportId, LANG_NAMES[currentLanguage]);
+        setTranslatedContent(result.success ? result : null);
+      } catch {
+        setTranslatedContent(null);
+      } finally {
+        setTranslationLoading(false);
+      }
+    };
+    fetchTranslation();
+  }, [currentLanguage, reportId]);
 
   const switchLanguage = (langCode) => {
     if (langCode === currentLanguage) return;
-
     setIsFading(true);
     setTimeout(() => {
       setCurrentLanguage(langCode);
@@ -115,31 +116,36 @@ export default function Translation() {
     setTimeout(() => setToastMessage(''), 2500);
   };
 
+  // Compute the summary text to display in the current language
+  const getSummaryText = () => {
+    if (currentLanguage === 'en') {
+      return reportData?.medical_summary || LANGS['en'].summary;
+    }
+    // For non-English: prefer real API translation, then mock translation, then static LANGS
+    if (translatedContent?.translated_text) return translatedContent.translated_text;
+    const mockReport = reportId ? getMockReportByID(reportId) : null;
+    if (mockReport?.translations?.[currentLanguage]?.medical_summary) {
+      return mockReport.translations[currentLanguage].medical_summary;
+    }
+    return LANGS[currentLanguage].summary;
+  };
+
+  const summaryText = getSummaryText();
+
   const copyTranslation = async () => {
-    // Use real report data if available, otherwise use mock LANGS data
     const lang = LANGS[currentLanguage];
-    if (!lang) return;
-
-    const summaryText = reportData?.medical_summary || lang.summary;
-    const plainText = lang.plain.join('\n');
-    const text = `${lang.cardTitle}\n\n${summaryText}\n\n${plainText}\n\n${lang.rec}`;
-
+    const text = `${lang.cardTitle}\n\n${summaryText}\n\n${lang.plain.join('\n')}\n\n${lang.rec}`;
     try {
       await navigator.clipboard.writeText(text);
-      showToast('✓ Copied to clipboard');
-    } catch (error) {
-      showToast('✗ Failed to copy');
+      showToast('Copied to clipboard');
+    } catch {
+      showToast('Failed to copy');
     }
   };
 
   const downloadTranslation = () => {
     const lang = LANGS[currentLanguage];
-    if (!lang) return;
-
-    const summaryText = reportData?.medical_summary || lang.summary;
-    const plainText = lang.plain.join('\n');
-    const text = `${lang.cardTitle}\n\n${summaryText}\n\n${plainText}\n\n${lang.rec}`;
-
+    const text = `${lang.cardTitle}\n\n${summaryText}\n\n${lang.plain.join('\n')}\n\n${lang.rec}`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -147,32 +153,16 @@ export default function Translation() {
     a.download = `translation-${currentLanguage}-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-
-    showToast('✓ Downloaded successfully');
+    showToast('Downloaded successfully');
   };
 
   const shareWhatsApp = () => {
-    const lang = LANGS[currentLanguage];
-    if (!lang) return;
-
-    const summaryText = reportData?.medical_summary || lang.summary;
-    const message = `${lang.cardTitle}\n\n${summaryText}`;
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
-    showToast('✓ Opening WhatsApp');
+    const message = `${LANGS[currentLanguage].cardTitle}\n\n${summaryText}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    showToast('Opening WhatsApp');
   };
 
-  const goBack = () => {
-    if (reportId) {
-      navigate(`/summary/${reportId}`);
-    } else {
-      navigate('/summary');
-    }
-  };
-
-  const analyzeAnother = () => {
-    navigate('/upload');
-  };
+  const goBack = () => navigate(reportId ? `/summary/${reportId}` : '/summary');
 
   if (loading) {
     return (
@@ -199,7 +189,6 @@ export default function Translation() {
         </div>
       </nav>
 
-      {/* Main Content */}
       <div className="translation-wrapper">
         {/* Breadcrumb */}
         <div className="breadcrumb">
@@ -216,13 +205,13 @@ export default function Translation() {
           </div>
           <div className="meta-actions">
             <button className="action-btn copy-btn" onClick={copyTranslation} title="Copy to clipboard">
-              📋 Copy
+              Copy
             </button>
-            <button className="action-btn download-btn" onClick={downloadTranslation} title="Download as text">
-              ⬇️ Download
+            <button className="action-btn download-btn" onClick={downloadTranslation} title="Download">
+              Download
             </button>
             <button className="action-btn whatsapp-btn" onClick={shareWhatsApp} title="Share on WhatsApp">
-              💬 Share
+              Share
             </button>
           </div>
         </div>
@@ -246,12 +235,10 @@ export default function Translation() {
         </div>
 
         <div className="main-layout">
-          {/* Main Content Column */}
+          {/* Main Content */}
           <div className="main-column">
-            {/* Translation Card */}
             <div className={`fade-content ${isFading ? 'fading' : ''}`} ref={contentRef}>
               <div className="translation-card">
-                {/* Card Header */}
                 <div className="card-header">
                   <div className="header-left">
                     <h2 className="card-title">{LANGS[currentLanguage].cardTitle}</h2>
@@ -262,13 +249,17 @@ export default function Translation() {
 
                 {/* Summary Section */}
                 <div className="section">
-                  <h3 className="section-title">📋 Summary</h3>
-                  <p className="section-text">{reportData?.medical_summary || LANGS[currentLanguage].summary}</p>
+                  <h3 className="section-title">Summary</h3>
+                  {translationLoading ? (
+                    <p className="section-text" style={{ color: '#9aaa9a' }}>Translating...</p>
+                  ) : (
+                    <p className="section-text">{summaryText}</p>
+                  )}
                 </div>
 
                 {/* Plain Language Section */}
                 <div className="section">
-                  <h3 className="section-title">📖 What Does This Mean?</h3>
+                  <h3 className="section-title">What Does This Mean?</h3>
                   <ul className="plain-list">
                     {LANGS[currentLanguage].plain.map((item, idx) => (
                       <li key={idx} className="plain-item">{item}</li>
@@ -276,16 +267,16 @@ export default function Translation() {
                   </ul>
                 </div>
 
-                {/* Doctor Recommendation Section */}
+                {/* Doctor Recommendation */}
                 <div className="section doctor-section">
-                  <h3 className="section-title">👨‍⚕️ Doctor's Recommendation</h3>
+                  <h3 className="section-title">Doctor's Recommendation</h3>
                   <p className="section-text">{LANGS[currentLanguage].rec}</p>
                 </div>
               </div>
 
-              {/* Comparison Card */}
+              {/* Comparison Table */}
               <div className="comparison-card">
-                <h3 className="card-title">📊 Comparison Table</h3>
+                <h3 className="card-title">Comparison Table</h3>
                 <table className="comparison-table">
                   <thead>
                     <tr>
@@ -308,9 +299,8 @@ export default function Translation() {
 
           {/* Sidebar */}
           <aside className="sidebar">
-            {/* Language Info Card */}
             <div className="sidebar-card language-info-card">
-              <h4 className="sidebar-card-title">ℹ️ Language Info</h4>
+              <h4 className="sidebar-card-title">Language Info</h4>
               <div className="info-item">
                 <span className="info-label">Language</span>
                 <span className="info-value">{LANGS[currentLanguage].name}</span>
@@ -329,9 +319,8 @@ export default function Translation() {
               </div>
             </div>
 
-            {/* Quality Card */}
             <div className="sidebar-card quality-card">
-              <h4 className="sidebar-card-title">⭐ Translation Quality</h4>
+              <h4 className="sidebar-card-title">Translation Quality</h4>
               {LANGS[currentLanguage].quality.map((item, idx) => (
                 <div key={idx} className="quality-item">
                   <div className="quality-header">
@@ -345,9 +334,8 @@ export default function Translation() {
               ))}
             </div>
 
-            {/* Language Chips Card */}
             <div className="sidebar-card language-chips-card">
-              <h4 className="sidebar-card-title">🌍 All Languages</h4>
+              <h4 className="sidebar-card-title">All Languages</h4>
               <div className="chips-grid">
                 {LANGUAGE_ORDER.map(code => (
                   <div key={code} className={`chip ${currentLanguage === code ? 'active' : ''}`}>
@@ -358,52 +346,26 @@ export default function Translation() {
               </div>
             </div>
 
-            {/* Export & Share Card */}
             <div className="sidebar-card export-card">
-              <h4 className="sidebar-card-title">📤 Export & Share</h4>
-              <button className="export-btn" onClick={copyTranslation}>
-                📋 Copy Translation
-              </button>
-              <button className="export-btn" onClick={downloadTranslation}>
-                ⬇️ Download as TXT
-              </button>
-              <button className="export-btn" onClick={shareWhatsApp}>
-                💬 Share on WhatsApp
-              </button>
+              <h4 className="sidebar-card-title">Export &amp; Share</h4>
+              <button className="export-btn" onClick={copyTranslation}>Copy Translation</button>
+              <button className="export-btn" onClick={downloadTranslation}>Download as TXT</button>
+              <button className="export-btn" onClick={shareWhatsApp}>Share on WhatsApp</button>
             </div>
 
-            {/* Quick Actions Card */}
             <div className="sidebar-card actions-card">
-              <h4 className="sidebar-card-title">⚡ Quick Actions</h4>
-              <button className="action-link" onClick={goBack}>
-                ← Back to Summary
-              </button>
-              <button className="action-link" onClick={analyzeAnother}>
-                📄 Analyze Another
-              </button>
-              <button className="action-link" onClick={() => setShowReportsModal(true)}>
-                📊 My Reports
-              </button>
-              <button className="action-link" onClick={() => setShowDetailsModal(true)}>
-                👤 My Details
-              </button>
+              <h4 className="sidebar-card-title">Quick Actions</h4>
+              <button className="action-link" onClick={goBack}>Back to Summary</button>
+              <button className="action-link" onClick={() => navigate('/upload')}>Analyze Another</button>
+              <button className="action-link" onClick={() => setShowReportsModal(true)}>My Reports</button>
+              <button className="action-link" onClick={() => setShowDetailsModal(true)}>My Details</button>
             </div>
           </aside>
         </div>
       </div>
 
-      {/* Modals */}
-      <MyDetailsModal
-        isOpen={showDetailsModal}
-        onClose={() => setShowDetailsModal(false)}
-      />
-
-      <MyReportsModal
-        isOpen={showReportsModal}
-        onClose={() => setShowReportsModal(false)}
-      />
-
-      {/* Toast */}
+      <MyDetailsModal isOpen={showDetailsModal} onClose={() => setShowDetailsModal(false)} />
+      <MyReportsModal isOpen={showReportsModal} onClose={() => setShowReportsModal(false)} />
       {toastMessage && <Toast message={toastMessage} />}
     </div>
   );

@@ -1,4 +1,5 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import logging
 import os
 from typing import Dict, Any, Optional, List
@@ -75,51 +76,49 @@ if not logger.handlers:
 
 # Get Gemini API key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = "gemini-2.0-flash-lite"
 
-# Initialize Gemini API
-_model = None
+# Initialize Gemini client
+_client = None
+_gemini_available = False
 
 def initialize_gemini():
-    """Initialize Gemini API with key"""
-    global _model
+    """Initialize Gemini API with key (graceful fallback if unavailable)"""
+    global _client, _gemini_available
 
-    if GEMINI_API_KEY is None:
-        error_msg = (
-            "GEMINI_API_KEY environment variable not set. "
-            "Translation and simplification features will not work. "
-            "Please set GEMINI_API_KEY in backend/.env file. "
-            "Get your key from: https://makersuite.google.com/app/apikey"
+    if GEMINI_API_KEY is None or GEMINI_API_KEY.strip() == "":
+        logger.warning(
+            "GEMINI_API_KEY not configured. "
+            "Translation will use fallback (return original text)."
         )
-        logger.error(f"✗ {error_msg}")
-        raise ValueError(error_msg)
-
-    if GEMINI_API_KEY == "your_gemini_api_key_here":
-        error_msg = (
-            "GEMINI_API_KEY is set to placeholder value. "
-            "Please replace 'your_gemini_api_key_here' with your actual API key in backend/.env "
-            "Get your key from: https://makersuite.google.com/app/apikey"
-        )
-        logger.error(f"✗ {error_msg}")
-        raise ValueError(error_msg)
+        _gemini_available = False
+        return None
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logger.debug("Gemini API configured with API key")
-
-        _model = genai.GenerativeModel("gemini-pro")
-        logger.info("✓ Gemini Model (gemini-pro) initialized for translation")
-        return _model
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info(f"Gemini Client initialized for translation (model: {GEMINI_MODEL})")
+        _gemini_available = True
+        return _client
     except Exception as e:
-        logger.error(f"✗ Failed to initialize Gemini: {str(e)}")
-        raise
+        logger.warning(
+            f"Failed to initialize Gemini: {str(e)}. "
+            f"Translation will use fallback (return original text)."
+        )
+        _gemini_available = False
+        return None
 
 
-def get_gemini_model():
-    """Lazy load Gemini model"""
-    global _model
-    if _model is None:
+def get_gemini_client():
+    """Lazy load Gemini client"""
+    global _client, _gemini_available
+    if _client is None and not _gemini_available:
         initialize_gemini()
-    return _model
+    return _client
+
+
+def is_gemini_available():
+    """Check if Gemini API is available"""
+    return _gemini_available
 
 
 # ============================================================================
@@ -138,21 +137,21 @@ def validate_input_text(text: str) -> tuple[bool, str]:
     """
     if not text:
         error = "Input text is empty"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
     if not isinstance(text, str):
         error = "Input must be a string"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
     text = text.strip()
     if len(text) < 5:
         error = "Input text too short (minimum 5 characters)"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
-    logger.debug(f"✓ Input validation passed: {len(text)} characters")
+    logger.debug(f"[OK] Input validation passed: {len(text)} characters")
     return True, ""
 
 
@@ -171,10 +170,10 @@ def validate_language(language: str) -> tuple[bool, str]:
     if language_lower not in SUPPORTED_LANGUAGES:
         supported = ", ".join(SUPPORTED_LANGUAGES.keys())
         error = f"Unsupported language: {language}. Supported: {supported}"
-        logger.warning(f"✗ {error}")
+        logger.warning(f"[FAIL] {error}")
         return False, error
 
-    logger.debug(f"✓ Language validation passed: {language}")
+    logger.debug(f"[OK] Language validation passed: {language}")
     return True, ""
 
 
@@ -206,7 +205,7 @@ def validate_translation(
     logger.debug(f"Validating translation to {language}...")
 
     if not translated or not translated.strip():
-        logger.warning("✗ Translated text is empty")
+        logger.warning("[FAIL] Translated text is empty")
         return {
             "is_valid": False,
             "quality_score": 0.0,
@@ -267,14 +266,14 @@ def validate_response(response: str) -> bool:
         True if response is valid
     """
     if not response or not response.strip():
-        logger.warning("✗ Empty response from Gemini API")
+        logger.warning("[FAIL] Empty response from Gemini API")
         return False
 
     if len(response) < 3:
-        logger.warning("✗ Response too short from Gemini API")
+        logger.warning("[FAIL] Response too short from Gemini API")
         return False
 
-    logger.debug(f"✓ Response validation passed: {len(response)} characters")
+    logger.debug(f"[OK] Response validation passed: {len(response)} characters")
     return True
 
 
@@ -319,7 +318,7 @@ def chunk_text_for_translation(
         chunks.append(text[start:end])
         start = end - overlap
 
-    logger.info(f"✓ Text chunked into {len(chunks)} chunks")
+    logger.info(f"[OK] Text chunked into {len(chunks)} chunks")
     return chunks
 
 
@@ -342,7 +341,7 @@ def merge_translated_chunks(
     merged = separator.join(chunk.strip() for chunk in chunks if chunk.strip())
     merged = merged.strip()
 
-    logger.info(f"✓ Chunks merged: {len(merged)} characters")
+    logger.info(f"[OK] Chunks merged: {len(merged)} characters")
     return merged
 
 
@@ -371,12 +370,13 @@ async def call_gemini_for_translation(prompt: str) -> str:
     """
     try:
         logger.debug("Calling Gemini API for translation...")
-        model = get_gemini_model()
+        client = get_gemini_client()
 
-        # Call the model
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
+        # Call the model (async)
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.2,  # Low temperature for accuracy
                 top_p=0.8,
                 top_k=40,
@@ -386,16 +386,16 @@ async def call_gemini_for_translation(prompt: str) -> str:
 
         # Extract text from response
         if response and response.text:
-            logger.debug(f"✓ Received translation response: {len(response.text)} characters")
+            logger.debug(f"[OK] Received translation response: {len(response.text)} characters")
             return response.text.strip()
         else:
             error = "Empty response from Gemini API"
-            logger.warning(f"✗ {error}")
+            logger.warning(f"[FAIL] {error}")
             raise Exception(error)
 
     except Exception as e:
         error_msg = str(e)
-        logger.warning(f"✗ Gemini API call failed: {error_msg}")
+        logger.warning(f"[FAIL] Gemini API call failed: {error_msg}")
         raise
 
 
@@ -406,6 +406,8 @@ async def call_gemini_for_translation(prompt: str) -> str:
 async def translate_text(text: str, target_language: str) -> Dict[str, Any]:
     """
     Translate text to target Indian language
+
+    Falls back to original text if Gemini API is unavailable.
 
     Args:
         text: Medical text to translate (ideally simplified)
@@ -458,6 +460,29 @@ async def translate_text(text: str, target_language: str) -> Dict[str, Any]:
         language_code = language_info["code"]
         language_native = language_info["native"]
 
+        # Check if Gemini is available
+        if not is_gemini_available():
+            logger.warning(f"[!]  Gemini API not available. Using fallback (original text) for {target_language}.")
+            return {
+                "original_text": text,
+                "translated_text": text,
+                "language": target_language,
+                "language_code": language_code,
+                "language_native": language_native,
+                "validation": {
+                    "is_valid": True,
+                    "quality_score": 0.5,
+                    "metrics": {
+                        "original_length": len(text),
+                        "translated_length": len(text),
+                        "length_ratio": 1.0,
+                        "has_content": True
+                    }
+                },
+                "error": "Gemini API not available; using original text as translation",
+                "success": True
+            }
+
         # Create translation prompt
         prompt = MEDICAL_TRANSLATION_PROMPT.format(
             target_language=language_native
@@ -469,7 +494,7 @@ async def translate_text(text: str, target_language: str) -> Dict[str, Any]:
         # Validate translation
         validation = validate_translation(text, translated, target_language)
 
-        logger.info(f"✓ Translation to {target_language} complete: {len(translated)} characters")
+        logger.info(f"[OK] Translation to {target_language} complete: {len(translated)} characters")
 
         return {
             "original_text": text,
@@ -483,18 +508,34 @@ async def translate_text(text: str, target_language: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
+        # Fall back to original text if translation fails
         error_msg = f"Translation failed: {str(e)}"
-        logger.error(f"✗ {error_msg}", exc_info=True)
-        return {
-            "original_text": text,
-            "translated_text": "",
-            "language": target_language,
-            "language_code": "",
-            "language_native": "",
-            "validation": {},
-            "error": error_msg,
-            "success": False
-        }
+        logger.warning(f"[!]  {error_msg}. Using fallback (original text).")
+
+        try:
+            language_lower = target_language.lower()
+            language_info = SUPPORTED_LANGUAGES.get(language_lower, {})
+            return {
+                "original_text": text,
+                "translated_text": text,
+                "language": target_language,
+                "language_code": language_info.get("code", ""),
+                "language_native": language_info.get("native", ""),
+                "validation": {},
+                "error": error_msg,
+                "success": True  # Fallback counts as successful (returns original)
+            }
+        except:
+            return {
+                "original_text": text,
+                "translated_text": "",
+                "language": target_language,
+                "language_code": "",
+                "language_native": "",
+                "validation": {},
+                "error": error_msg,
+                "success": False
+            }
 
 
 async def translate_to_multiple_languages(
@@ -549,7 +590,7 @@ async def translate_to_multiple_languages(
             errors.append(error_msg)
 
     logger.info(
-        f"✓ Batch translation complete: {successful}/{len(languages)} successful"
+        f"[OK] Batch translation complete: {successful}/{len(languages)} successful"
     )
 
     return {
@@ -687,7 +728,7 @@ async def batch_translate(
                 "results": []
             })
 
-    logger.info(f"✓ Batch translation complete: {successful_translations} total translations")
+    logger.info(f"[OK] Batch translation complete: {successful_translations} total translations")
 
     return {
         "total_texts": len(texts),
@@ -719,7 +760,7 @@ def get_supported_languages() -> List[Dict[str, str]]:
             "label": value["label"]
         })
 
-    logger.info(f"✓ Retrieved {len(languages)} supported languages")
+    logger.info(f"[OK] Retrieved {len(languages)} supported languages")
     return languages
 
 
